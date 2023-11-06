@@ -13,7 +13,7 @@ from typing import Optional, Tuple, Type
 from .common import LayerNorm2d, MLPBlock
 from .adapter_modules import SpatialPriorModule, SpatialPriorModule_self, \
             InteractionBlock_global, injector_global, deform_inputs, \
-            InteractionBlock_deformable
+            InteractionBlock_deformable, InteractionBlock_deformable_mlp_on_vit
 
 from torch.nn.init import normal_
 from timm.models.layers import trunc_normal_
@@ -151,6 +151,22 @@ class ImageEncoderViT(nn.Module):
                                                     cffn_ratio=kwargs['cffn_ratio'], deform_ratio=kwargs['deform_ratio'],
                                                     with_cp=kwargs['with_cp'], final_block=True, n_level=len(self.n_level_ratio_list))
                 #
+                elif self.attn_type == 'deformable_vit_mlp':
+                    self.interactions = nn.Sequential(*[
+                                            InteractionBlock_deformable_mlp_on_vit(embed_dim, num_heads=kwargs['deform_num_heads'], 
+                                                    n_points=kwargs['n_points'],
+                                                    init_values=kwargs['init_values'], drop_path=kwargs['drop_path'],
+                                                    norm_layer=norm_layer,
+                                                    cffn_ratio=kwargs['cffn_ratio'], deform_ratio=kwargs['deform_ratio'],
+                                                    with_cp=kwargs['with_cp'], final_block=False, n_level=len(self.n_level_ratio_list))
+                                                for i in range(len(self.interaction_indexes))
+                                            ])
+                    self.final_interaction = InteractionBlock_deformable_mlp_on_vit(embed_dim, num_heads=kwargs['deform_num_heads'], 
+                                                    n_points=kwargs['n_points'],
+                                                    init_values=kwargs['init_values'], drop_path=kwargs['drop_path'],
+                                                    norm_layer=norm_layer,
+                                                    cffn_ratio=kwargs['cffn_ratio'], deform_ratio=kwargs['deform_ratio'],
+                                                    with_cp=kwargs['with_cp'], final_block=False, n_level=len(self.n_level_ratio_list))
                 self.SPM.apply(self._init_weights)
                 self.interactions.apply(self._init_weights)
                 self.final_interaction.apply(self._init_weights)

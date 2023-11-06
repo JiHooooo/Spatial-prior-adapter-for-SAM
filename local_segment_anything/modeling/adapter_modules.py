@@ -463,6 +463,48 @@ class Extractor(nn.Module):
             
         return query
 
+class InteractionBlock_deformable_mlp_on_vit(nn.Module):
+    def __init__(self, embed_dim, num_heads=6, n_points=4, norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                 drop_path=0., cffn_ratio=0.25, init_values=0.,
+                 deform_ratio=1.0, with_cp=False, final_block = True, n_level=3, deform_attn=True):
+        super().__init__()
+        self.deform_attn = deform_attn
+        if self.deform_attn:
+            self.injector = Injector(embed_dim, n_levels=n_level, num_heads=num_heads, init_values=init_values,
+                                 n_points=n_points, norm_layer=norm_layer, deform_ratio=deform_ratio,
+                              with_cp=with_cp, with_cffp=True, drop_path=drop_path, cffn_ratio=cffn_ratio)
+        else:
+            self.injector = Injector_mlp_global(embed_dim, num_heads=num_heads, downsample_rate=1/cffn_ratio, norm_layer=norm_layer,
+                                                drop_path=drop_path, cffn_ratio=cffn_ratio, with_cp=True)
+        if not final_block:
+            self.extractor = None
+        else:
+            if self.deform_attn:
+                self.extractor = extractor_deform(embed_dim, n_levels=1, num_heads=num_heads, n_points=n_points,
+                                    norm_layer=norm_layer, deform_ratio=deform_ratio,
+                                    cffn_ratio=cffn_ratio, drop_path=drop_path, with_cp=with_cp, with_cffn=False)
+            else:
+                self.extractor = extractor_global_no_mlp(embed_dim=embed_dim,num_heads=num_heads, downsample_rate=1/cffn_ratio)
+
+    def forward(self, vit_feature, adapter_feature, deform_inputs1=None, deform_inputs2=None, H=None, W=None):
+        # bs, _, dim
+        if self.deform_attn:
+            if self.extractor is not None:
+                adapter_feature = self.extractor(adapter_feature=adapter_feature, reference_points=deform_inputs2[0],
+                                    vit_feature=vit_feature, spatial_shapes=deform_inputs2[1],
+                                    level_start_index=deform_inputs2[2], H=H, W=W)
+            # bs, _, dim
+            vit_feature = self.injector(query=vit_feature, reference_points=deform_inputs1[0],
+                                feat=adapter_feature, spatial_shapes=deform_inputs1[1],
+                                level_start_index=deform_inputs1[2], ) 
+        else:
+            if self.extractor is not None:
+                adapter_feature = self.extractor(vit_feature, adapter_feature)
+            vit_feature = self.injector(vit_feature, adapter_feature)
+
+        return vit_feature, adapter_feature
+
+
 class Injector_deform(nn.Module):
     def __init__(self, dim, num_heads=6, n_points=4, n_levels=1, deform_ratio=1.0,
                  norm_layer=partial(nn.LayerNorm, eps=1e-6), init_values=0., with_cp=False,
